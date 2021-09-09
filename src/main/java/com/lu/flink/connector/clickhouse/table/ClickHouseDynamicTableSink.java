@@ -1,19 +1,21 @@
 package com.lu.flink.connector.clickhouse.table;
 
+import com.lu.flink.connector.clickhouse.table.internal.AbstractClickHouseSinkFunction;
 import com.lu.flink.connector.clickhouse.table.internal.options.ClickHouseOptions;
 import org.apache.flink.table.catalog.ResolvedSchema;
 import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.connector.sink.DynamicTableSink;
-import org.apache.flink.table.connector.sink.OutputFormatProvider;
+import org.apache.flink.table.connector.sink.SinkFunctionProvider;
+import org.apache.flink.table.types.DataType;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.Preconditions;
 
 public class ClickHouseDynamicTableSink implements DynamicTableSink {
-    private final ClickHouseOptions clickHouseOptions;
+    private final ClickHouseOptions options;
     private final ResolvedSchema resolvedSchema;
 
-    public ClickHouseDynamicTableSink(ClickHouseOptions clickHouseOptions, ResolvedSchema resolvedSchema) {
-        this.clickHouseOptions = clickHouseOptions;
+    public ClickHouseDynamicTableSink(ClickHouseOptions options, ResolvedSchema resolvedSchema) {
+        this.options = options;
         this.resolvedSchema = resolvedSchema;
     }
 
@@ -34,13 +36,19 @@ public class ClickHouseDynamicTableSink implements DynamicTableSink {
 
     @Override
     public SinkRuntimeProvider getSinkRuntimeProvider(Context context) {
-        // TODO ClickHouseTableSinkFunction
-        return OutputFormatProvider.of(null);
+        AbstractClickHouseSinkFunction sinkFunction = (new AbstractClickHouseSinkFunction.Builder())
+                .withOptions(this.options)
+                .withFieldNames(this.resolvedSchema.getColumnNames().toArray(new String[0]))
+                .withFieldDataTypes(this.resolvedSchema.getColumnDataTypes().toArray(new DataType[0]))
+                .withPrimaryKey(this.resolvedSchema.getPrimaryKey())
+                .withRowDataTypeInfo(context.createTypeInformation(this.resolvedSchema.toSourceRowDataType()))
+                .build();
+        return SinkFunctionProvider.of(sinkFunction);
     }
 
     @Override
     public DynamicTableSink copy() {
-        return new ClickHouseDynamicTableSink(clickHouseOptions, resolvedSchema);
+        return new ClickHouseDynamicTableSink(options, resolvedSchema);
     }
 
     @Override

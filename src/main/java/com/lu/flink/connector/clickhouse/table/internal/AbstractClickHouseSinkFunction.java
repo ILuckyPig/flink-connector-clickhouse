@@ -1,9 +1,12 @@
 package com.lu.flink.connector.clickhouse.table.internal;
 
 
+import com.lu.flink.connector.clickhouse.table.internal.connection.ClickHouseConnectionProvider;
 import com.lu.flink.connector.clickhouse.table.internal.convertor.ClickHouseRowConverter;
+import com.lu.flink.connector.clickhouse.table.internal.executor.ClickHouseBatchExecutor;
 import com.lu.flink.connector.clickhouse.table.internal.executor.ClickHouseExecutor;
 import com.lu.flink.connector.clickhouse.table.internal.options.ClickHouseOptions;
+import com.lu.flink.connector.clickhouse.table.internal.partitioner.ClickHousePartitioner;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.streaming.api.functions.sink.RichSinkFunction;
 import org.apache.flink.table.catalog.UniqueConstraint;
@@ -24,6 +27,8 @@ import java.util.Optional;
  * @author luanxin
  */
 public abstract class AbstractClickHouseSinkFunction extends RichSinkFunction<RowData> implements Flushable {
+    private static final long serialVersionUID = 1L;
+
     public static class Builder {
         private static final Logger LOG = LoggerFactory.getLogger(AbstractClickHouseSinkFunction.Builder.class);
         private DataType[] fieldDataTypes;
@@ -31,6 +36,9 @@ public abstract class AbstractClickHouseSinkFunction extends RichSinkFunction<Ro
         private String[] fieldNames;
         private Optional<UniqueConstraint> primaryKey;
         private TypeInformation<RowData> rowDataTypeInformation;
+
+        public Builder() {
+        }
 
         public AbstractClickHouseSinkFunction.Builder withOptions(ClickHouseOptions options) {
             this.options = options;
@@ -58,105 +66,76 @@ public abstract class AbstractClickHouseSinkFunction extends RichSinkFunction<Ro
         }
 
         public AbstractClickHouseSinkFunction build() {
-            Preconditions.checkNotNull(options);
-            Preconditions.checkNotNull(fieldNames);
-            Preconditions.checkNotNull(fieldDataTypes);
-            LogicalType[] logicalTypes = Arrays.stream(fieldDataTypes).map(DataType::getLogicalType).toArray(LogicalType[]::new);
+            Preconditions.checkNotNull(this.options);
+            Preconditions.checkNotNull(this.fieldNames);
+            Preconditions.checkNotNull(this.fieldDataTypes);
+            LogicalType[] logicalTypes = Arrays.stream(this.fieldDataTypes).map(DataType::getLogicalType).toArray(LogicalType[]::new);
             ClickHouseRowConverter converter = new ClickHouseRowConverter(RowType.of(logicalTypes));
-            if (primaryKey.isPresent()) {
+            if (this.primaryKey.isPresent()) {
                 LOG.warn("If primary key is specified, connector will be in UPSERT mode.");
                 LOG.warn("You will have significant performance loss.");
             }
 
-            return (AbstractClickHouseSinkFunction) (options.getWriteLocal() ? createShardOutputFormat(logicalTypes, converter) : createBatchSinkFunction(converter));
+            return this.options.getWriteLocal() ? this.createShardSinkFunction(logicalTypes, converter) : this.createBatchSinkFunction(converter);
         }
 
         private ClickHouseBatchSinkFunction createBatchSinkFunction(ClickHouseRowConverter converter) {
             ClickHouseExecutor executor;
-            if (primaryKey.isPresent() && !options.getIgnoreDelete()) {
-                executor = ClickHouseExecutor.createUpsertExecutor(
-                        options.getTableName(),
-                        fieldNames,
-                        listToStringArray(primaryKey.get().getColumns()),
-                        converter,
-                        options);
+            if (this.primaryKey.isPresent() && !this.options.getIgnoreDelete()) {
+                executor = ClickHouseExecutor.createUpsertExecutor(this.options.getTableName(), this.fieldNames,
+                        this.listToStringArray(this.primaryKey.get().getColumns()), converter, this.options);
             } else {
-                String sql = ClickHouseStatementFactory.getInsertIntoStatement(options.getTableName(), fieldNames);
-                executor = new ClickHouseBatchExecutor(
-                        sql,
-                        converter,
-                        options.getFlushInterval(),
-                        options.getBatchSize(),
-                        options.getMaxRetries(),
-                        rowDataTypeInformation);
+                String sql = ClickHouseStatementFactory.getInsertIntoStatement(this.options.getTableName(), this.fieldNames);
+                executor = new ClickHouseBatchExecutor(sql, converter, this.options.getFlushInterval(), this.options.getBatchSize(),
+                        this.options.getMaxRetries(), this.rowDataTypeInformation);
             }
 
-            return new ClickHouseBatchSinkFunction(new ClickHouseConnectionProvider(options), (ClickHouseExecutor) executor, options);
+            return new ClickHouseBatchSinkFunction(new ClickHouseConnectionProvider(this.options), executor, this.options);
         }
 
-        private ClickHouseShardOutputFormat createShardOutputFormat(LogicalType[] logicalTypes, ClickHouseRowConverter converter) {
-            String partitionStrategy = options.getPartitionStrategy();
-            byte var5 = -1;
-            switch (partitionStrategy) {
-                case -1924829944:
-                    if (var4.equals("balanced")) {
-                        var5 = 0;
-                    }
-                    break;
-                case 3195150:
-                    if (var4.equals("hash")) {
-                        var5 = 2;
-                    }
-                    break;
-                case 2072332025:
-                    if (var4.equals("shuffle")) {
-                        var5 = 1;
-                    }
-            }
-
+        private ClickHouseShardSinkFunction createShardSinkFunction(LogicalType[] logicalTypes, ClickHouseRowConverter converter) {
+            String partitionStrategy = this.options.getPartitionStrategy();
             ClickHousePartitioner partitioner;
-            switch (var5) {
-                case 0:
+            switch (partitionStrategy) {
+                case "balanced":
                     partitioner = ClickHousePartitioner.createBalanced();
                     break;
-                case 1:
+                case "shuffle":
                     partitioner = ClickHousePartitioner.createShuffle();
                     break;
-                case 2:
-                    int index = Arrays.asList(fieldNames).indexOf(options.getPartitionKey());
+                case "hash":
+                    int index = Arrays.asList(this.fieldNames).indexOf(this.options.getPartitionKey());
                     if (index == -1) {
-                        throw new IllegalArgumentException("Partition key `" + options.getPartitionKey() + "` not found in table schema");
+                        throw new IllegalArgumentException("Partition key `" + this.options.getPartitionKey() + "` not found in table schema");
                     }
 
                     RowData.FieldGetter getter = RowData.createFieldGetter(logicalTypes[index], index);
                     partitioner = ClickHousePartitioner.createHash(getter);
                     break;
                 default:
-                    throw new IllegalArgumentException("Unknown sink.partition-strategy `" + options.getPartitionStrategy() + "`");
+                    throw new IllegalArgumentException("Unknown sink.partition-strategy `" + this.options.getPartitionStrategy() + "`");
             }
 
-            Optional keyFields;
-            if (primaryKey.isPresent() && !options.getIgnoreDelete()) {
-                keyFields = Optional.of(listToStringArray(((UniqueConstraint) primaryKey.get()).getColumns()));
+            Optional<String[]> keyFields;
+            if (this.primaryKey.isPresent() && !this.options.getIgnoreDelete()) {
+                keyFields = Optional.of(this.listToStringArray(this.primaryKey.get().getColumns()));
             } else {
                 keyFields = Optional.empty();
             }
 
-            return new ClickHouseShardOutputFormat(new ClickHouseConnectionProvider(options), fieldNames, keyFields, converter, partitioner, options);
+            return new ClickHouseShardSinkFunction(new ClickHouseConnectionProvider(this.options), this.fieldNames, keyFields, converter, partitioner, this.options);
         }
 
         private String[] listToStringArray(List<String> lists) {
             if (lists == null) {
                 return new String[0];
+            } else {
+                String[] keyFields = new String[lists.size()];
+                for (int i = 0; i < lists.size(); i++) {
+                    keyFields[i] = lists.get(i);
+                }
+                return keyFields;
             }
-
-            String[] keyFields = new String[lists.size()];
-            int i = 0;
-            for (String s : lists) {
-                keyFields[i++] = s;
-            }
-            return keyFields;
-
         }
     }
 }

@@ -1,10 +1,11 @@
 package com.lu.flink.connector.clickhouse.table.internal.options;
 
 import javax.annotation.Nullable;
+import java.io.Serializable;
 import java.time.Duration;
 import java.util.Optional;
 
-public class ClickHouseOptions {
+public class ClickHouseOptions implements Serializable {
     private static final long serialVersionUID = 1L;
     private final String url;
     private final String username;
