@@ -89,7 +89,7 @@ public class ClickHouseShardSinkFunction extends AbstractClickHouseSinkFunction 
     private void initializeExecutors() throws SQLException {
         String sql = ClickHouseStatementFactory.getInsertIntoStatement(this.remoteTable, this.fieldNames);
 
-        for (int i = 0; i < this.shardConnections.size(); ++i) {
+        for (ClickHouseConnection shardConnection : this.shardConnections) {
             ClickHouseExecutor executor;
             if (this.keyFields.length > 0) {
                 executor = ClickHouseExecutor.createUpsertExecutor(this.remoteTable, this.fieldNames, this.keyFields, this.converter, this.options);
@@ -98,7 +98,7 @@ public class ClickHouseShardSinkFunction extends AbstractClickHouseSinkFunction 
                         this.options.getBatchSize(), this.options.getMaxRetries(), null);
             }
 
-            executor.prepareStatement(this.shardConnections.get(i));
+            executor.prepareStatement(shardConnection);
             this.shardExecutors.add(executor);
         }
 

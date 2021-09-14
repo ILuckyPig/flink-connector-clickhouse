@@ -20,7 +20,9 @@ public class ClickHouseTest {
                 ),
                 row("2021-09-01", 1, 1, 1),
                 row("2021-09-01", 2, 2, 2),
-                row("2021-09-01", 3, 3, 3)
+                row("2021-09-01", 3, 3, 3),
+                row("2021-10-01", 4, 4, 4),
+                row("2021-10-01", 5, 5, 5)
         );
         tableEnvironment.createTemporaryView("source", table);
         tableEnvironment.executeSql(
@@ -36,8 +38,10 @@ public class ClickHouseTest {
                         ",'password'=''\n" +
                         ",'database-name'='database_test'\n" +
                         ",'table-name'='order'\n" +
-                        ",'sink.batch-size'='1'\n" +
+                        ",'sink.batch-size'='2'\n" +
                         ",'sink.write-local'='true'\n" +
+                        ",'sink.partition-strategy'='toYYYYMM'\n" +
+                        ",'sink.partition-key'='dt'\n" +
                         ")"
         );
         tableEnvironment.executeSql(

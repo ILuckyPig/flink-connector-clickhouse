@@ -7,6 +7,8 @@ import com.lu.flink.connector.clickhouse.table.internal.executor.ClickHouseBatch
 import com.lu.flink.connector.clickhouse.table.internal.executor.ClickHouseExecutor;
 import com.lu.flink.connector.clickhouse.table.internal.options.ClickHouseOptions;
 import com.lu.flink.connector.clickhouse.table.internal.partitioner.ClickHousePartitioner;
+import com.lu.flink.connector.clickhouse.table.internal.partitioner.sharding.AbstractShardingKey;
+import com.lu.flink.connector.clickhouse.table.internal.partitioner.sharding.ShardingKeyUtil;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.streaming.api.functions.sink.RichSinkFunction;
 import org.apache.flink.table.catalog.UniqueConstraint;
@@ -96,6 +98,8 @@ public abstract class AbstractClickHouseSinkFunction extends RichSinkFunction<Ro
         private ClickHouseShardSinkFunction createShardSinkFunction(LogicalType[] logicalTypes, ClickHouseRowConverter converter) {
             String partitionStrategy = this.options.getPartitionStrategy();
             ClickHousePartitioner partitioner;
+            int index;
+            RowData.FieldGetter getter;
             switch (partitionStrategy) {
                 case "balanced":
                     partitioner = ClickHousePartitioner.createBalanced();
@@ -104,16 +108,23 @@ public abstract class AbstractClickHouseSinkFunction extends RichSinkFunction<Ro
                     partitioner = ClickHousePartitioner.createShuffle();
                     break;
                 case "hash":
-                    int index = Arrays.asList(this.fieldNames).indexOf(this.options.getPartitionKey());
+                    index = Arrays.asList(this.fieldNames).indexOf(this.options.getPartitionKey());
                     if (index == -1) {
                         throw new IllegalArgumentException("Partition key `" + this.options.getPartitionKey() + "` not found in table schema");
                     }
 
-                    RowData.FieldGetter getter = RowData.createFieldGetter(logicalTypes[index], index);
+                    getter = RowData.createFieldGetter(logicalTypes[index], index);
                     partitioner = ClickHousePartitioner.createHash(getter);
                     break;
                 default:
-                    throw new IllegalArgumentException("Unknown sink.partition-strategy `" + this.options.getPartitionStrategy() + "`");
+                    AbstractShardingKey shardingKey = ShardingKeyUtil.findAndCreateShardingKey(partitionStrategy);
+                    index = Arrays.asList(this.fieldNames).indexOf(this.options.getPartitionKey());
+                    if (index == -1) {
+                        throw new IllegalArgumentException("Partition key `" + this.options.getPartitionKey() + "` not found in table schema");
+                    }
+                    getter = RowData.createFieldGetter(logicalTypes[index], index);
+                    shardingKey.setGetter(getter);
+                    partitioner = shardingKey;
             }
 
             Optional<String[]> keyFields;

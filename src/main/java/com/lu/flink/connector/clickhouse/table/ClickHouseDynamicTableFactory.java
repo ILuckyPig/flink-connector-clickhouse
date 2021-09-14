@@ -1,6 +1,8 @@
 package com.lu.flink.connector.clickhouse.table;
 
 import com.lu.flink.connector.clickhouse.table.internal.options.ClickHouseOptions;
+import com.lu.flink.connector.clickhouse.table.internal.partitioner.sharding.ShardingKey;
+import com.lu.flink.connector.clickhouse.table.internal.partitioner.sharding.ShardingKeyUtil;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.ReadableConfig;
@@ -13,6 +15,7 @@ import java.time.Duration;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * @author luanxin
@@ -121,10 +124,12 @@ public class ClickHouseDynamicTableFactory implements DynamicTableSinkFactory {
 
     private void validateConfigOptions(ReadableConfig config) {
         String partitionStrategy = config.get(SINK_PARTITION_STRATEGY);
-        if (!Arrays.asList("hash", "balanced", "shuffle").contains(partitionStrategy)) {
+        Set<String> identifierSet = ShardingKeyUtil.findShardingKeys().stream().map(ShardingKey::identifier).collect(Collectors.toSet());
+        if (!Arrays.asList("hash", "balanced", "shuffle").contains(partitionStrategy)
+                && !identifierSet.contains(partitionStrategy)) {
             throw new IllegalArgumentException("Unknown sink.partition-strategy `" + partitionStrategy + "`");
-        } else if (partitionStrategy.equals("hash") && !config.getOptional(SINK_PARTITION_KEY).isPresent()) {
-            throw new IllegalArgumentException("A partition key must be provided for hash partition strategy");
+        } else if (!partitionStrategy.equals("balanced") && !partitionStrategy.equals("shuffle") && !config.getOptional(SINK_PARTITION_KEY).isPresent()) {
+            throw new IllegalArgumentException("A partition key must be provided for " + partitionStrategy + " partition strategy");
         } else if (config.getOptional(USERNAME).isPresent() ^ config.getOptional(PASSWORD).isPresent()) {
             throw new IllegalArgumentException("Either all or none of username and password should be provided");
         }
